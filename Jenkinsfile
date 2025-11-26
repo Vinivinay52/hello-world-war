@@ -1,16 +1,20 @@
 pipeline {
     agent any
     stages {
-        stage('InstallMaven') {
-            steps {
-                sh "sudo apt update"
-                sh "sudo apt install maven -y"
-            }
-        }
             stage('Checkout') {
             steps {
                 sh "rm -rf hello-world-war"
                 sh "git clone https://github.com/Vinivinay52/hello-world-war"
+            }
+        }
+         stage('build') {
+            steps {
+                sh "mvn clean package"
+            }
+        }
+         stage('deploy') {
+            steps {
+                sh "sudo cp /var/lib/jenkins/workspace/hello-world-war/target/hello-world-war-1.0.0.war /opt/apache-tomcat-9.0.86/webapps/"
             }
         }
     }
