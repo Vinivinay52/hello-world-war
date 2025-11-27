@@ -14,7 +14,8 @@ pipeline {
         }
          stage('deploy') {
             steps {
-                sh "sudo cp /var/lib/jenkins/workspace/hello-world-war/target/hello-world-war-1.0.0.war /opt/apache-tomcat-10.1.19/webapps/"
+                sh "sudo cp /var/lib/jenkins/workspace/hello-world-war/target/*.war /opt/apache-tomcat-10.1.19/webapps/"
+
             }
         }
     }
