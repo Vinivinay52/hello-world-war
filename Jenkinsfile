@@ -1,5 +1,10 @@
 pipeline {
     agent none
+    parameters {
+string(name: 'SAMPLE_STRING', defaultValue: 'default', description: 'A sample string parameter')
+booleanParam(name: 'SAMPLE_BOOLEAN', defaultValue: true, description: 'A boolean parameter')
+choice(name: 'GIVE_CHOICE', choices: ['Ansible', 'Kubernetes'], description: 'Choose one option')
+}
     stages {
             stage ('hello-world-war') {
             parallel {
