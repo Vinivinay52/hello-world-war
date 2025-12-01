@@ -24,6 +24,7 @@ choice(name: 'cmd1', choices: ['package', 'install', 'compile'], description: 'C
                 sh "git clone https://github.com/Vinivinay52/hello-world-war"
             }
         }
+        }
          stage('build') {
             agent { label 'java' }
              steps {
@@ -40,5 +41,5 @@ choice(name: 'cmd1', choices: ['package', 'install', 'compile'], description: 'C
     }
 }
 }
-}
-}
+    }
+
