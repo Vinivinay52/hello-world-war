@@ -34,7 +34,7 @@ choice(name: 'cmd1', choices: ['package', 'install', 'compile'], description: 'C
          stage('deploy') {
              agent { label 'java' }
             steps {
-                sh "sudo cp /home/slave1/workspace/Hello_Word_Pipeline/target/hello-world-war-1.0.0.war  /opt/apache-tomcat-10.1.49/webapps"
+                sh "sudo cp /home/slave20/workspace/Hello_Word_Pipeline/target/hello-world-war-1.0.0.war  /opt/apache-tomcat-10.1.49/webapps"
 
             }
         }
