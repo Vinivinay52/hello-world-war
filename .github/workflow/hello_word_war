@@ -1,0 +1,43 @@
+name: hello-world-war CI
+
+on:
+  push:
+    branches: [ "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: 'maven'
+
+    - name: Build WAR
+      run: mvn clean package
+
+    - name: Install Tomcat
+      run: |
+        wget https://archive.apache.org/dist/tomcat/tomcat-10/v10.1.5/bin/apache-tomcat-10.1.5.tar.gz
+        tar -xzf apache-tomcat-10.1.5.tar.gz
+        mv apache-tomcat-10.1.5 tomcat
+        chmod +x tomcat/bin/*
+
+    - name: Deploy WAR to Tomcat
+      run: |
+        cp target/*.war tomcat/webapps/
+        nohup tomcat/bin/startup.sh &
+        sleep 15s
+
+    - name: Health Check
+      run: curl -I http://localhost:8080/
+
+    - name: Verify Deployed App
+      run: |
+        RESPONSE=$(curl -s http://localhost:8080/)
+        echo "$RESPONSE"
