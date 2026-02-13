@@ -21,9 +21,9 @@ pipeline {
             steps {
                 echo "Logging into AWS ECR..."
                 sh '''
-                aws ecr get-login-password --region ap-northeast-1 | \
+                aws ecr get-login-password --region ap-south-1 | \
                 docker login --username AWS --password-stdin \
-                666098475443.dkr.ecr.ap-northeast-1.amazonaws.com
+                666098475443.dkr.ecr.ap-ap-south-1.amazonaws.com
                 '''
             }
         }
@@ -33,7 +33,7 @@ pipeline {
                 echo "Tagging image..."
                 sh '''
                 docker tag hello-world-war-dckr:${BUILD_NUMBER} \
-                666098475443.dkr.ecr.ap-northeast-1.amazonaws.com/hello-world-war-dckr:${BUILD_NUMBER}
+                666098475443.dkr.ecr.ap-south-1.amazonaws.com/hello-world-war-dckr:${BUILD_NUMBER}
                 '''
             }
         }
@@ -42,7 +42,7 @@ pipeline {
             steps {
                 echo "Pushing image to ECR..."
                 sh '''
-                docker push 666098475443.dkr.ecr.ap-northeast-1.amazonaws.com/hello-world-war-dckr:${BUILD_NUMBER}
+                docker push 666098475443.dkr.ecr.ap-south-1.amazonaws.com/hello-world-war-dckr:${BUILD_NUMBER}
                 '''
             }
         }
@@ -55,7 +55,7 @@ pipeline {
                 docker rm hello-container || true
                 docker run -d -p 8088:8080 \
                 --name hello-container \
-                666098475443.dkr.ecr.ap-northeast-1.amazonaws.com/hello-world-war-dckr:${BUILD_NUMBER}
+                666098475443.dkr.ecr.ap-south-1.amazonaws.com/hello-world-war-dckr:${BUILD_NUMBER}
                 '''
             }
         }
