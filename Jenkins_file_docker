@@ -1,0 +1,63 @@
+pipeline {
+    agent { label 'slave' }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                echo "Checking out source code..."
+                checkout scm
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo "Building Docker image..."
+                sh 'docker build -t hello-world-war-dckr:${BUILD_NUMBER} .'
+            }
+        }
+
+        stage('Login to ECR') {
+            steps {
+                echo "Logging into AWS ECR..."
+                sh '''
+                aws ecr get-login-password --region ap-northeast-1 | \
+                docker login --username AWS --password-stdin \
+                666098475443.dkr.ecr.ap-northeast-1.amazonaws.com
+                '''
+            }
+        }
+
+        stage('Tag Docker Image') {
+            steps {
+                echo "Tagging image..."
+                sh '''
+                docker tag hello-world-war-dckr:${BUILD_NUMBER} \
+                666098475443.dkr.ecr.ap-northeast-1.amazonaws.com/hello-world-war-dckr:${BUILD_NUMBER}
+                '''
+            }
+        }
+
+        stage('Push to ECR') {
+            steps {
+                echo "Pushing image to ECR..."
+                sh '''
+                docker push 666098475443.dkr.ecr.ap-northeast-1.amazonaws.com/hello-world-war-dckr:${BUILD_NUMBER}
+                '''
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                echo "Deploying container..."
+                sh '''
+                docker stop hello-container || true
+                docker rm hello-container || true
+                docker run -d -p 8088:8080 \
+                --name hello-container \
+                666098475443.dkr.ecr.ap-northeast-1.amazonaws.com/hello-world-war-dckr:${BUILD_NUMBER}
+                '''
+            }
+        }
+    }
+}
