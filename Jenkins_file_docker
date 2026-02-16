@@ -12,6 +12,7 @@ pipeline {
         DOCKER_CREDS = "dockerhub-creds"
         IMAGE_TAG    = "v${BUILD_NUMBER}"
         CONTAINER_NAME = "hello-world-war-container"
+        HOME = "${WORKSPACE}"
     }
 
     stages {
