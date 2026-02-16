@@ -9,6 +9,7 @@ pipeline {
     environment {
         REPO_NAME    = "vinay/hello-world-war"
         IMAGE_NAME   = "${REPO_NAME}"
+        DOCKER_CREDS = "dockerhub-creds"
         IMAGE_TAG    = "v${BUILD_NUMBER}"
         CONTAINER_NAME = "hello-world-war-container"
     }
@@ -60,7 +61,7 @@ pipeline {
                 docker rm ${CONTAINER_NAME} || true
 
                 # Run new container
-                docker run -d -p 8088:8080 --name ${CONTAINER_NAME} ${IMAGE_NAME}:${IMAGE_TAG}
+                docker run -d -p 9090:8080 --name ${CONTAINER_NAME} ${IMAGE_NAME}:${IMAGE_TAG}
                 """
             }
         }
