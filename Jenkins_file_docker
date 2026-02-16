@@ -5,7 +5,6 @@ pipeline {
             args '-v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker'
         }
     }
-
     environment {
         REPO_NAME    = "vinay/hello-world-war"
         IMAGE_NAME   = "${REPO_NAME}"
