@@ -6,7 +6,7 @@ pipeline {
         }
     }
     environment {
-        REPO_NAME    = "vinay/hello-world-war"
+        REPO_NAME    = "thorvini/hello-world-war"
         IMAGE_NAME   = "${REPO_NAME}"
         //DOCKER_CREDS = "dockerhub-creds"
         IMAGE_TAG    = "${BUILD_NUMBER}"
