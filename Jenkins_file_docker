@@ -1,32 +1,30 @@
 pipeline {
   agent {
     docker {
-      // Image with docker CLI + git; stable-git is Alpine-based and small
-      image 'docker:stable-git'
-      // Mount host Docker socket and disable entrypoint so Jenkins can run `cat`
-      // Also set HOME/DOCKER_CONFIG to a writable path inside the agent container
-      args '-v /var/run/docker.sock:/var/run/docker.sock --entrypoint="" -e HOME=/var/jenkins_home -e DOCKER_CONFIG=/var/jenkins_home/.docker'
+      image 'docker:stable-git'   // has docker + git
+      // Mount the host daemon socket, clear entrypoint, set writable HOME/DOCKER_CONFIG,
+      // and RUN AS ROOT (u 0:0) so docker CLI can access the socket.
+      args '-u 0:0 -v /var/run/docker.sock:/var/run/docker.sock --entrypoint="" -e HOME=/var/jenkins_home -e DOCKER_CONFIG=/var/jenkins_home/.docker'
       reuseNode true
     }
   }
 
   options {
     timestamps()
-    // Avoid Jenkins’ automatic “Declarative: Checkout SCM” confusion when the job is defined from SCM
-    skipDefaultCheckout(true)
+    skipDefaultCheckout(true)     // avoid job-level auto checkout confusion
   }
 
   environment {
     // Git
     GIT_URL    = 'https://github.com/Vinivinay52/hello-world-war.git'
-    GIT_BRANCH = 'master'   // <-- your repo uses master, not main
+    GIT_BRANCH = 'master'         // your repo uses master
 
-    // Docker Hub repo / image
+    // Docker Hub image
     REPO_NAME      = 'vinay/hello-world-war'
     IMAGE_NAME     = "${REPO_NAME}"
     IMAGE_TAG      = "v${BUILD_NUMBER}"
 
-    // Deploy target (runs on the host via the mounted docker.sock)
+    // Deploy target on host
     CONTAINER_NAME = 'hello-world-war-container'
     HOST_PORT      = '8088'
     APP_PORT       = '8080'
@@ -35,11 +33,10 @@ pipeline {
   stages {
     stage('Prepare agent') {
       steps {
-        // Ensure the config directory exists and is writable for Docker CLI
+        // Ensure a writable docker config directory inside agent
         sh 'mkdir -p "$HOME/.docker" && chmod 700 "$HOME/.docker"'
-        // docker:stable-git is Alpine; install curl for smoke test (no-op if present)
+        // Add curl for smoke test (alpine base)
         sh 'apk add --no-cache curl >/dev/null 2>&1 || true'
-        // Show where HOME points now
         sh 'echo "HOME=$HOME"; ls -ld "$HOME" "$HOME/.docker" || true'
         sh 'docker version && git --version && curl --version | head -n 1'
       }
@@ -63,7 +60,7 @@ pipeline {
     stage('Login to Docker Hub') {
       steps {
         withCredentials([usernamePassword(
-          credentialsId: 'DOCKER_CREDS',   // Jenkins > Manage Credentials (global)
+          credentialsId: 'DOCKER_CREDS',   // Jenkins > Credentials (global)
           usernameVariable: 'DOCKER_USER',
           passwordVariable: 'DOCKER_PASS'
         )]) {
