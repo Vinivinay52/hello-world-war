@@ -1,9 +1,9 @@
 pipeline {
   agent {
     docker {
-      image 'docker:stable-git'   // has docker + git
-      // Mount the host daemon socket, clear entrypoint, set writable HOME/DOCKER_CONFIG,
-      // and RUN AS ROOT (u 0:0) so docker CLI can access the socket.
+      // Use a modern docker CLI image. 27+ is compatible with daemon API >=1.44.
+      image 'docker:27-cli'      // or 'docker:27.2-cli' / 'docker:28-cli' / 'docker:29-cli' if available
+      // Run as root to access /var/run/docker.sock; mount socket; clear entrypoint; set writable HOME
       args '-u 0:0 -v /var/run/docker.sock:/var/run/docker.sock --entrypoint="" -e HOME=/var/jenkins_home -e DOCKER_CONFIG=/var/jenkins_home/.docker'
       reuseNode true
     }
@@ -11,15 +11,15 @@ pipeline {
 
   options {
     timestamps()
-    skipDefaultCheckout(true)     // avoid job-level auto checkout confusion
+    skipDefaultCheckout(true)  // so only our explicit checkout runs
   }
 
   environment {
-    // Git
+    // Git repo & branch
     GIT_URL    = 'https://github.com/Vinivinay52/hello-world-war.git'
-    GIT_BRANCH = 'master'         // your repo uses master
+    GIT_BRANCH = 'master'
 
-    // Docker Hub image
+    // Docker Hub repo/image
     REPO_NAME      = 'vinay/hello-world-war'
     IMAGE_NAME     = "${REPO_NAME}"
     IMAGE_TAG      = "v${BUILD_NUMBER}"
@@ -33,12 +33,11 @@ pipeline {
   stages {
     stage('Prepare agent') {
       steps {
-        // Ensure a writable docker config directory inside agent
         sh 'mkdir -p "$HOME/.docker" && chmod 700 "$HOME/.docker"'
-        // Add curl for smoke test (alpine base)
+        // Add curl for smoke test; alpine-based image
         sh 'apk add --no-cache curl >/dev/null 2>&1 || true'
         sh 'echo "HOME=$HOME"; ls -ld "$HOME" "$HOME/.docker" || true'
-        sh 'docker version && git --version && curl --version | head -n 1'
+        sh 'docker version && git --version || true'
       }
     }
 
@@ -60,7 +59,7 @@ pipeline {
     stage('Login to Docker Hub') {
       steps {
         withCredentials([usernamePassword(
-          credentialsId: 'DOCKER_CREDS',   // Jenkins > Credentials (global)
+          credentialsId: 'DOCKER_CREDS',
           usernameVariable: 'DOCKER_USER',
           passwordVariable: 'DOCKER_PASS'
         )]) {
