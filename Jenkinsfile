@@ -8,11 +8,11 @@ pipeline {
         DOCKER_IMAGE    = "thorvini/hello-world-war"
         IMAGE_TAG       = "${BUILD_NUMBER}"
 
-        // Default chart location (we auto-resolve actual path at runtime)
+        // Nominal chart location (we will auto-resolve actual path at runtime)
         CHART_DIR       = "helm/hello-world-war"
         CHART_NAME      = "hello-world-war"
 
-        // JFROG Helm OCI
+        // JFrog Helm (OCI)
         JFROG_HOST      = "trialf5h0jz.jfrog.io"
         JFROG_HELM_REPO = "hello-world-war"
         JFROG_OCI_URL   = "oci://${JFROG_HOST}/${JFROG_HELM_REPO}"
@@ -37,7 +37,7 @@ pipeline {
             }
         }
 
-        // FIXED: resolve the chart directory that directly contains values.yaml
+        // Resolve the chart directory that directly contains values.yaml (handles spaces/non-ASCII in parent dirs)
         stage("Locate chart dir") {
             steps {
                 script {
@@ -106,6 +106,7 @@ pipeline {
                     usernameVariable: "DOCKER_USER",
                     passwordVariable: "DOCKER_PASS"
                 )]) {
+                    // Single-quoted shell (no Groovy interpolation of secrets); variables expand in the shell
                     sh '''
                         set -e
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
@@ -171,21 +172,23 @@ PY
             }
         }
 
+        // Write clean SemVer (no stray quotes)
         stage("Update Chart.yaml version") {
             steps {
-                sh '''
+                sh """
                     set -e
-                    sed -i "s|^version:.*|version: 0.1.'"$BUILD_NUMBER"'|" "${CHART_DIR_RESOLVED}/Chart.yaml"
-                    sed -i "s|^appVersion:.*|appVersion: \\"'"$IMAGE_TAG"'\\"|" "${CHART_DIR_RESOLVED}/Chart.yaml"
+                    sed -i 's|^version:.*|version: 0.1.${BUILD_NUMBER}|' "${CHART_DIR_RESOLVED}/Chart.yaml"
+                    sed -i 's|^appVersion:.*|appVersion: "${IMAGE_TAG}"|' "${CHART_DIR_RESOLVED}/Chart.yaml"
+
                     echo "===== Updated Chart.yaml ====="
                     cat "${CHART_DIR_RESOLVED}/Chart.yaml"
-                '''
+                """
             }
         }
 
         stage("Lint Chart") {
             steps {
-                sh 'helm lint "${CHART_DIR_RESOLVED}"'
+                sh "helm lint \"${CHART_DIR_RESOLVED}\""
             }
         }
 
@@ -211,7 +214,7 @@ PY
                 )]) {
                     sh '''
                         set -e
-                        echo "$JFROG_PASS" | helm registry login '"$JFROG_HOST"' -u "$JFROG_USER" --password-stdin
+                        echo "$JFROG_PASS" | helm registry login "$JFROG_HOST" -u "$JFROG_USER" --password-stdin
                     '''
                 }
             }
@@ -223,37 +226,38 @@ PY
                     set -e
                     CHART_PKG=$(ls packaged/*.tgz | head -n 1)
                     if [ -z "$CHART_PKG" ]; then echo "ERROR: No chart package found in packaged/"; exit 2; fi
-                    echo "Pushing: $CHART_PKG -> '"$JFROG_OCI_URL"'"
-                    helm push "$CHART_PKG" '"$JFROG_OCI_URL"'
+                    echo "Pushing: $CHART_PKG -> $JFROG_OCI_URL"
+                    helm push "$CHART_PKG" "$JFROG_OCI_URL"
                 '''
             }
         }
 
         stage("Deploy to Kubernetes") {
             steps {
-                sh '''
+                sh """
                     set -e
-                    export KUBECONFIG='"$KUBECONFIG"'
-                    CHART_VERSION=$(grep '^version:' "${CHART_DIR_RESOLVED}/Chart.yaml" | awk '{print $2}')
+                    export KUBECONFIG=${KUBECONFIG}
+
+                    CHART_VERSION=\$(grep '^version:' "${CHART_DIR_RESOLVED}/Chart.yaml" | awk '{print \$2}')
 
                     echo "===== Deploy ====="
-                    echo "Chart: '"$CHART_NAME"'  Version: $CHART_VERSION"
-                    echo "Image: '"$DOCKER_IMAGE:$IMAGE_TAG"'"
+                    echo "Chart: ${CHART_NAME}  Version: \$CHART_VERSION"
+                    echo "Image: ${DOCKER_IMAGE}:${IMAGE_TAG}"
 
-                    helm upgrade --install '"$RELEASE_NAME"' '"$JFROG_OCI_URL"'/'"$CHART_NAME"' \
-                      --version "$CHART_VERSION" \
-                      --namespace '"$KUBE_NAMESPACE"' \
-                      --create-namespace \
-                      --set image.repository='"$DOCKER_IMAGE"' \
-                      --set image.tag='"$IMAGE_TAG"' \
-                      --set image.pullPolicy=Always \
+                    helm upgrade --install ${RELEASE_NAME} ${JFROG_OCI_URL}/${CHART_NAME} \\
+                      --version \$CHART_VERSION \\
+                      --namespace ${KUBE_NAMESPACE} \\
+                      --create-namespace \\
+                      --set image.repository=${DOCKER_IMAGE} \\
+                      --set image.tag=${IMAGE_TAG} \\
+                      --set image.pullPolicy=Always \\
                       --wait --atomic --debug
 
                     echo "===== Pods ====="
-                    kubectl get pods -n '"$KUBE_NAMESPACE"'
+                    kubectl get pods -n ${KUBE_NAMESPACE}
                     echo "===== Services ====="
-                    kubectl get svc -n '"$KUBE_NAMESPACE"'
-                '''
+                    kubectl get svc -n ${KUBE_NAMESPACE}
+                """
             }
         }
     }
