@@ -1,45 +1,78 @@
 pipeline {
-    agent none
-    parameters {
-string(name: 'cmd', defaultValue: '', description: 'A sample string parameter')
-booleanParam(name: 'SAMPLE_BOOLEAN', defaultValue: true, description: 'A boolean parameter')
-choice(name: 'cmd1', choices: ['package', 'install', 'compile'], description: 'Choose one option')
-}
-    stages {
-            stage ('hello-world-war') {
-            parallel {
-            stage ('checkout') {
-                agent { label 'java' }
-                steps {
-                    withCredentials([
-            usernamePassword(credentialsId: '8c6c682c-68e8-41e6-937b-ec240a7a07a5',
-                     usernameVariable: 'Vinay_USERNAME',
-                     passwordVariable: 'Vinay_PASSWORD'),
-            sshUserPrivateKey(credentialsId: 'a905781f-db2a-4e12-af68-9b8d2b7890fa',
-                      keyFileVariable: 'KEY_FILE',
-                      usernameVariable: 'SSH_USER')
-]) {
+  agent any
 
-                sh "rm -rf hello-world-war"
-                sh "git clone https://github.com/Vinivinay52/hello-world-war"
-            }
-        }
-        }
-         stage('build') {
-            agent { label 'java' }
-             steps {
-                sh "mvn $cmd $cmd1"
-            }
-        }
-         stage('deploy') {
-             agent { label 'java' }
-            steps {
-                sh "sudo cp /home/slave1/workspace/Hello_Word_Pipeline/target/hello-world-war-1.0.0.war  /opt/apache-tomcat-10.1.49/webapps"
+  // Use the tool names you configured in "Global Tool Configuration"
+  tools {
+    jdk   'Java17'
+    maven 'Maven3'
+  }
 
-            }
-        }
-    }
-}
-}
+  // Adjust these to your environment
+  environment {
+    REMOTE_USER = 'ubuntu'                // or ec2-user on Amazon Linux
+    REMOTE_HOST = 'YOUR_SERVER_IP'        // <-- replace with your server's public IP/DNS
+    TOMCAT_HOME = '/opt/tomcat10'         // '/opt/apache-tomcat-10.1.49' if that's what you installed
+  }
+
+  parameters {
+    choice(name: 'MVN_GOAL',
+           choices: ['clean package','package','install','compile'],
+           description: 'Maven goal to run')
+    booleanParam(name: 'SKIP_TESTS',
+                 defaultValue: true,
+                 description: 'Skip unit tests (-DskipTests)')
+  }
+
+  stages {
+
+    stage('Checkout') {
+      steps {
+        // If the repo becomes private, add: credentialsId: 'github_https'
+        git branch: 'master', url: 'https://github.com/Vinivinay52/hello-world-war.git'
+      }
     }
 
+    stage('Build WAR') {
+      steps {
+        sh '''
+          set -e
+          GOAL="${MVN_GOAL}"
+          if [ "${SKIP_TESTS}" = "true" ]; then SKIP="-DskipTests"; else SKIP=""; fi
+          echo "Running: mvn -B ${GOAL} ${SKIP}"
+          mvn -B ${GOAL} ${SKIP}
+          echo "Build output:"
+          ls -l target
+        '''
+        archiveArtifacts artifacts: 'target/*.war', fingerprint: true
+      }
+    }
+
+    stage('Deploy to Tomcat (SSH)') {
+      steps {
+        // Uses your SSH credential you created earlier
+        sshagent(credentials: ['tomcat_ssh']) {
+          sh '''
+            set -e
+            WAR="$(ls -1 target/*.war | head -n1)"
+            echo "Deploying $WAR to ${REMOTE_USER}@${REMOTE_HOST}:${TOMCAT_HOME}/webapps/"
+            scp -o StrictHostKeyChecking=no "$WAR" ${REMOTE_USER}@${REMOTE_HOST}:${TOMCAT_HOME}/webapps/
+
+            echo "Restarting Tomcat..."
+            ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} "${TOMCAT_HOME}/bin/shutdown.sh || true"
+            sleep 3
+            ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} "${TOMCAT_HOME}/bin/startup.sh"
+          '''
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "✅ Deployment complete. Visit: http://${env.REMOTE_HOST}:8080/hello-world-war/"
+    }
+    failure {
+      echo "❌ Pipeline failed — check the stage logs."
+    }
+  }
+}
