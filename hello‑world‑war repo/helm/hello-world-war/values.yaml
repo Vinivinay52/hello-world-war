@@ -1,0 +1,7 @@
+image:
+  repository: thorvini/hello-world-war
+  tag: "latest"
+  pullPolicy: Always
+
+service:
+  port: 8080
