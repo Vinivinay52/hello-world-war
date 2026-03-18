@@ -1,0 +1,38 @@
+name: CD — Deploy to Tomcat
+
+on:
+  workflow_run:
+    workflows: ["CI — Build WAR"]
+    types: [completed]
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download WAR from CI
+        uses: actions/download-artifact@v4
+        with:
+          name: hello-world-war
+          path: dist
+
+      - name: Transfer WAR to Server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "dist/*.war"
+          target: "/opt/tomcat10/webapps/"
+
+      - name: Restart Tomcat
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            /opt/tomcat10/bin/shutdown.sh || true
+            sleep 3
+            /opt/tomcat10/bin/startup.sh
