@@ -8,7 +8,7 @@ pipeline {
         DOCKER_IMAGE    = "thorvini/hello-world-war"
         IMAGE_TAG       = "${BUILD_NUMBER}"
 
-        // Nominal chart location (we will auto-resolve actual path at runtime)
+        // Nominal chart location (we auto-resolve the actual path at runtime)
         CHART_DIR       = "helm/hello-world-war"
         CHART_NAME      = "hello-world-war"
 
@@ -21,6 +21,9 @@ pipeline {
         KUBE_NAMESPACE  = "default"
         RELEASE_NAME    = "hello-world-war"
         KUBECONFIG      = "/var/lib/jenkins/.kube/config"
+
+        // Chosen free NodePort (your scan showed 30080 and 31174 in use)
+        NODE_PORT       = "30081"
     }
 
     options {
@@ -37,7 +40,7 @@ pipeline {
             }
         }
 
-        // Resolve the chart directory that directly contains values.yaml (handles spaces/non-ASCII in parent dirs)
+        // Resolve the chart directory that directly contains values.yaml (handles spaces/special chars)
         stage("Locate chart dir") {
             steps {
                 script {
@@ -106,7 +109,6 @@ pipeline {
                     usernameVariable: "DOCKER_USER",
                     passwordVariable: "DOCKER_PASS"
                 )]) {
-                    // Single-quoted shell (no Groovy interpolation of secrets); variables expand in the shell
                     sh '''
                         set -e
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
@@ -118,7 +120,7 @@ pipeline {
             }
         }
 
-        // SAFE Python updater (no Groovy interpolation, reads env via os.environ)
+        // SAFE Python updater (no Groovy interpolation; reads env via os.environ)
         stage("Update values.yaml") {
             steps {
                 withEnv([
@@ -205,73 +207,3 @@ PY
             }
         }
 
-        stage("Login to JFrog (Helm OCI)") {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: "jfrog-creds",
-                    usernameVariable: "JFROG_USER",
-                    passwordVariable: "JFROG_PASS"
-                )]) {
-                    sh '''
-                        set -e
-                        echo "$JFROG_PASS" | helm registry login "$JFROG_HOST" -u "$JFROG_USER" --password-stdin
-                    '''
-                }
-            }
-        }
-
-        stage("Push Chart to JFrog OCI") {
-            steps {
-                sh '''
-                    set -e
-                    CHART_PKG=$(ls packaged/*.tgz | head -n 1)
-                    if [ -z "$CHART_PKG" ]; then echo "ERROR: No chart package found in packaged/"; exit 2; fi
-                    echo "Pushing: $CHART_PKG -> $JFROG_OCI_URL"
-                    helm push "$CHART_PKG" "$JFROG_OCI_URL"
-                '''
-            }
-        }
-
-        stage("Deploy to Kubernetes") {
-            steps {
-                sh """
-                    set -e
-                    export KUBECONFIG=${KUBECONFIG}
-
-                    CHART_VERSION=\$(grep '^version:' "${CHART_DIR_RESOLVED}/Chart.yaml" | awk '{print \$2}')
-
-                    echo "===== Deploy ====="
-                    echo "Chart: ${CHART_NAME}  Version: \$CHART_VERSION"
-                    echo "Image: ${DOCKER_IMAGE}:${IMAGE_TAG}"
-
-                    helm upgrade --install ${RELEASE_NAME} ${JFROG_OCI_URL}/${CHART_NAME} \\
-                      --version \$CHART_VERSION \\
-                      --namespace ${KUBE_NAMESPACE} \\
-                      --create-namespace \\
-                      --set image.repository=${DOCKER_IMAGE} \\
-                      --set image.tag=${IMAGE_TAG} \\
-                      --set image.pullPolicy=Always \\
-                      --wait --atomic --debug
-
-                    echo "===== Pods ====="
-                    kubectl get pods -n ${KUBE_NAMESPACE}
-                    echo "===== Services ====="
-                    kubectl get svc -n ${KUBE_NAMESPACE}
-                """
-            }
-        }
-    }
-
-    post {
-        always {
-            sh "helm registry logout ${JFROG_HOST} || true"
-            cleanWs()
-        }
-        success {
-            echo "SUCCESS: Image built & pushed; chart pushed to Artifactory; deployed to cluster."
-        }
-        failure {
-            echo "FAILED: Check stage logs above."
-        }
-    }
-}
