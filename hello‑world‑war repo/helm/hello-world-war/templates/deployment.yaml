@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-world-war
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hello-world-war
+  template:
+    metadata:
+      labels:
+        app: hello-world-war
+    spec:
+      containers:
+        - name: hello-world-war
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          ports:
+            - containerPort: 8080
