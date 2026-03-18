@@ -1,78 +1,59 @@
 pipeline {
-  agent any
+    agent any
 
-  // Use the tool names you configured in "Global Tool Configuration"
-  tools {
-    jdk   'Java17'
-    maven 'Maven3'
-  }
-
-  // Adjust these to your environment
-  environment {
-    REMOTE_USER = 'ubuntu'                // or ec2-user on Amazon Linux
-    REMOTE_HOST = 'YOUR_SERVER_IP'        // <-- replace with your server's public IP/DNS
-    TOMCAT_HOME = '/opt/tomcat10'         // '/opt/apache-tomcat-10.1.49' if that's what you installed
-  }
-
-  parameters {
-    choice(name: 'MVN_GOAL',
-           choices: ['clean package','package','install','compile'],
-           description: 'Maven goal to run')
-    booleanParam(name: 'SKIP_TESTS',
-                 defaultValue: true,
-                 description: 'Skip unit tests (-DskipTests)')
-  }
-
-  stages {
-
-    stage('Checkout') {
-      steps {
-        // If the repo becomes private, add: credentialsId: 'github_https'
-        git branch: 'master', url: 'https://github.com/Vinivinay52/hello-world-war.git'
-      }
+    environment {
+        REMOTE_USER = 'ubuntu'
+        REMOTE_HOST = '13.203.65.79'
+        TOMCAT_HOME = '/opt/tomcat10'
     }
 
-    stage('Build WAR') {
-      steps {
-        sh '''
-          set -e
-          GOAL="${MVN_GOAL}"
-          if [ "${SKIP_TESTS}" = "true" ]; then SKIP="-DskipTests"; else SKIP=""; fi
-          echo "Running: mvn -B ${GOAL} ${SKIP}"
-          mvn -B ${GOAL} ${SKIP}
-          echo "Build output:"
-          ls -l target
-        '''
-        archiveArtifacts artifacts: 'target/*.war', fingerprint: true
-      }
-    }
+    stages {
 
-    stage('Deploy to Tomcat (SSH)') {
-      steps {
-        // Uses your SSH credential you created earlier
-        sshagent(credentials: ['tomcat_ssh']) {
-          sh '''
-            set -e
-            WAR="$(ls -1 target/*.war | head -n1)"
-            echo "Deploying $WAR to ${REMOTE_USER}@${REMOTE_HOST}:${TOMCAT_HOME}/webapps/"
-            scp -o StrictHostKeyChecking=no "$WAR" ${REMOTE_USER}@${REMOTE_HOST}:${TOMCAT_HOME}/webapps/
-
-            echo "Restarting Tomcat..."
-            ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} "${TOMCAT_HOME}/bin/shutdown.sh || true"
-            sleep 3
-            ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} "${TOMCAT_HOME}/bin/startup.sh"
-          '''
+        stage('Checkout') {
+            steps {
+                git branch: 'master', 
+                    url: 'https://github.com/Vinivinay52/hello-world-war.git'
+            }
         }
-      }
-    }
-  }
 
-  post {
-    success {
-      echo "✅ Deployment complete. Visit: http://${env.REMOTE_HOST}:8080/hello-world-war/"
+        stage('Check Java & Maven') {
+            steps {
+                sh '''
+                    echo "Checking Java & Maven on Jenkins agent..."
+                    java -version
+                    mvn -version
+                '''
+            }
+        }
+
+        stage('Build WAR') {
+            steps {
+                sh '''
+                    echo "Building WAR..."
+                    mvn clean package -DskipTests
+                    ls -l target
+                '''
+            }
+        }
+
+        stage('Deploy to Tomcat') {
+            steps {
+                sshagent(['tomcat_ssh']) {
+                    sh '''
+                        echo "Copying WAR to Remote Server..."
+                        WAR_FILE=$(ls target/*.war | head -n1)
+
+                        scp -o StrictHostKeyChecking=no "$WAR_FILE" ${REMOTE_USER}@${REMOTE_HOST}:${TOMCAT_HOME}/webapps/
+
+                        echo "Restarting Tomcat..."
+                        ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} "${TOMCAT_HOME}/bin/shutdown.sh || true"
+                        sleep 3
+                        ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} "${TOMCAT_HOME}/bin/startup.sh"
+
+                        echo "Deployment Completed."
+                    '''
+                }
+            }
+        }
     }
-    failure {
-      echo "❌ Pipeline failed — check the stage logs."
-    }
-  }
 }
