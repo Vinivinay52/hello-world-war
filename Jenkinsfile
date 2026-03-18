@@ -6,7 +6,7 @@ pipeline {
         DOCKER_IMAGE    = "thorvini/hello-world-war"
         IMAGE_TAG       = "${BUILD_NUMBER}"
 
-        CHART_DIR       = "helm/hello-world-war"
+        CHART_DIR       = "ello‑world‑war repo/helm/hello-world-war"
         CHART_NAME      = "hello-world-war"
 
         JFROG_HOST      = "trialf5h0jz.jfrog.io"
