@@ -3,10 +3,13 @@ kind: Service
 metadata:
   name: hello-world-war
 spec:
-  type: NodePort
+  type: {{ .Values.service.type | default "NodePort" }}
   ports:
-    - port: 8080
-      targetPort: 8080
-      nodePort: 30080
+    - port: {{ .Values.service.port | default 8080 }}
+      targetPort: {{ .Values.service.port | default 8080 }}
+      {{- /* Only set nodePort when Service type is NodePort AND a positive nodePort value is provided */}}
+      {{- if and (eq (.Values.service.type | default "NodePort") "NodePort") (hasKey .Values.service "nodePort") (gt (int (toString .Values.service.nodePort)) 0) }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}
   selector:
     app: hello-world-war
