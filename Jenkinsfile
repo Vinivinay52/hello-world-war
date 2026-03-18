@@ -3,16 +3,21 @@ pipeline {
 
     environment {
         APP_NAME        = "hello-world-war"
+
+        // Docker image coordinates
         DOCKER_IMAGE    = "thorvini/hello-world-war"
         IMAGE_TAG       = "${BUILD_NUMBER}"
 
-        CHART_DIR       = "ello‑world‑war repo/helm/hello-world-war"
+        // Default chart location (we will auto-resolve real path at runtime)
+        CHART_DIR       = "helm/hello-world-war"
         CHART_NAME      = "hello-world-war"
 
+        // JFrog Artifactory Helm (OCI)
         JFROG_HOST      = "trialf5h0jz.jfrog.io"
         JFROG_HELM_REPO = "hello-world-war"
         JFROG_OCI_URL   = "oci://${JFROG_HOST}/${JFROG_HELM_REPO}"
 
+        // Kubernetes
         KUBE_NAMESPACE  = "default"
         RELEASE_NAME    = "hello-world-war"
         KUBECONFIG      = "/var/lib/jenkins/.kube/config"
@@ -25,10 +30,37 @@ pipeline {
 
     stages {
 
+        /* Jenkins also does a "Declarative: Checkout SCM" automatically.
+           Keeping an explicit checkout stage for clarity and idempotence. */
         stage('Checkout Code') {
             steps {
                 git branch: 'master',
                     url: 'https://github.com/Vinivinay52/hello-world-war.git'
+            }
+        }
+
+        /* NEW: Resolve the real chart directory at runtime, regardless of
+                 the parent folder having spaces or non-ASCII hyphens. */
+        stage('Locate chart dir') {
+            steps {
+                script {
+                    def found = sh(returnStdout: true, label: 'find chart dir', script: '''
+                        set -e
+                        # find a values.yaml for the hello-world-war chart anywhere in repo
+                        p=$(find . -type f -path "*/helm/hello-world-war/values.yaml" -print -quit)
+                        if [ -n "$p" ]; then
+                          dirname "$(dirname "$p")"   # => .../helm/hello-world-war
+                        fi
+                    ''').trim()
+
+                    if (!found) {
+                        error "Could not locate values.yaml for hello-world-war chart. Expected pattern: */helm/hello-world-war/values.yaml"
+                    }
+
+                    // strip leading "./" if present
+                    env.CHART_DIR_RESOLVED = found.replaceFirst(/^\\.\//, '')
+                    echo "Resolved chart dir: ${env.CHART_DIR_RESOLVED}"
+                }
             }
         }
 
@@ -68,23 +100,23 @@ pipeline {
                 withCredentials([usernamePassword(credentialsId: 'docker-creds',
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS')]) {
-
-                    sh """
+                    // Use single-quoted shell so there is no Groovy interpolation of secrets
+                    sh '''
                         set -e
-                        echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
-                        docker push ${DOCKER_IMAGE}:${IMAGE_TAG}
-                        docker push ${DOCKER_IMAGE}:latest
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        docker push '"$DOCKER_IMAGE"':'"$IMAGE_TAG"'
+                        docker push '"$DOCKER_IMAGE"':latest
                         docker logout || true
-                    """
+                    '''
                 }
             }
         }
 
-        /**************  FIXED STAGE (Variant A: Python reads env safely)  **************/
+        /* FIXED: Update values.yaml safely (Python reads env via os.environ) */
         stage('Update values.yaml') {
             steps {
                 withEnv([
-                    "CHART_DIR=${CHART_DIR}",
+                    "CHART_DIR_RESOLVED=${CHART_DIR_RESOLVED}",
                     "DOCKER_IMAGE=${DOCKER_IMAGE}",
                     "IMAGE_TAG=${IMAGE_TAG}",
                     "WORKSPACE_DIR=${WORKSPACE}"
@@ -94,37 +126,35 @@ pipeline {
                         echo "===== Debug Workspace ====="
                         pwd
                         ls -la
-                        find . -name values.yaml || true
+                        echo "Resolved chart dir: ${CHART_DIR_RESOLVED}"
+                        [ -f "${CHART_DIR_RESOLVED}/values.yaml" ] || { echo "values.yaml not found at ${CHART_DIR_RESOLVED}"; exit 2; }
 
-                        # Single-quoted heredoc: prevents Groovy/shell interpolation of ${...}
+                        # Single-quoted heredoc so no Groovy/shell interpolation is applied inside Python
                         python3 - <<'PY'
 from pathlib import Path
 import os, re
 
-chart_dir = os.environ["CHART_DIR"]
+chart_dir = os.environ["CHART_DIR_RESOLVED"]
 repo      = os.environ["DOCKER_IMAGE"]
-# Fall back to BUILD_NUMBER or 'latest' if IMAGE_TAG not set
 tag       = os.environ.get("IMAGE_TAG") or os.environ.get("BUILD_NUMBER","latest")
 
 p = Path(chart_dir) / "values.yaml"
 print("Using file:", p)
 if not p.exists():
-    raise FileNotFoundError("values.yaml not found at: " + str(p))
+    raise FileNotFoundError(f"values.yaml not found at: {p}")
 
 text = p.read_text()
 
 def upsert(pattern, replacement, text):
     if re.search(pattern, text, flags=re.M):
         return re.sub(pattern, replacement, text, flags=re.M)
-    # If the key doesn't exist, try to append inside 'image:' block
+    # If a key is missing, try to insert under 'image:' block; otherwise append a new block
     if 'image:' in text:
         return re.sub(r'(^image:\\s*$)',
                       r"\\1\\n  repository: " + repo + "\\n  tag: \\"" + tag + "\\"\\n  pullPolicy: Always",
                       text, flags=re.M)
-    # If no image block at all, add one at the end
     return text + "\\nimage:\\n  repository: " + repo + "\\n  tag: \\"" + tag + "\\"\\n  pullPolicy: Always\\n"
 
-# Ensure/update the three keys
 text = upsert(r'^\\s*repository:\\s*.*$', '  repository: ' + repo, text)
 text = upsert(r'^\\s*tag:\\s*.*$',        '  tag: "' + tag + '"', text)
 text = upsert(r'^\\s*pullPolicy:\\s*.*$', '  pullPolicy: Always', text)
@@ -134,112 +164,17 @@ print("values.yaml updated successfully")
 PY
 
                         echo "===== Updated values.yaml ====="
-                        cat "${CHART_DIR}/values.yaml"
+                        sed -n '1,120p' "${CHART_DIR_RESOLVED}/values.yaml"
                     '''
                 }
             }
         }
-        /**************  END FIXED STAGE  **************/
 
         stage('Update Chart.yaml version') {
             steps {
                 sh """
                     set -e
-                    sed -i 's|^version:.*|version: 0.1.${BUILD_NUMBER}|' ${CHART_DIR}/Chart.yaml
-                    sed -i 's|^appVersion:.*|appVersion: "${IMAGE_TAG}"|' ${CHART_DIR}/Chart.yaml
+                    sed -i 's|^version:.*|version: 0.1.${BUILD_NUMBER}|' "${CHART_DIR_RESOLVED}/Chart.yaml"
+                    sed -i 's|^appVersion:.*|appVersion: \\"${IMAGE_TAG}\\"|' "${CHART_DIR_RESOLVED}/Chart.yaml"
 
                     echo "===== Updated Chart.yaml ====="
-                    cat ${CHART_DIR}/Chart.yaml
-                """
-            }
-        }
-
-        stage('Lint Chart') {
-            steps {
-                sh "helm lint ${CHART_DIR}"
-            }
-        }
-
-        stage('Package Chart') {
-            steps {
-                sh """
-                  set -e
-                  mkdir -p packaged
-                  rm -f packaged/*.tgz
-                  helm package ${CHART_DIR} -d packaged
-
-                  echo "===== Packaged Chart ====="
-                  ls -lh packaged
-                """
-            }
-        }
-
-        stage('Login to JFrog') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'jfrog-creds',
-                    usernameVariable: 'JFROG_USER',
-                    passwordVariable: 'JFROG_PASS')]) {
-
-                    sh """
-                        set -e
-                        echo "${JFROG_PASS}" | helm registry login ${JFROG_HOST} -u "${JFROG_USER}" --password-stdin
-                    """
-                }
-            }
-        }
-
-        stage('Push Chart to JFrog OCI') {
-            steps {
-                sh """
-                  set -e
-                  CHART_PKG=\$(ls packaged/${CHART_NAME}-*.tgz | head -n 1)
-                  if [ -z "\$CHART_PKG" ]; then echo "ERROR: No chart package found"; exit 2; fi
-                  echo "Pushing: \$CHART_PKG -> ${JFROG_OCI_URL}"
-                  helm push "\$CHART_PKG" ${JFROG_OCI_URL}
-                """
-            }
-        }
-
-        stage('Deploy to Kubernetes') {
-            steps {
-                sh """
-                  set -e
-                  export KUBECONFIG=${KUBECONFIG}
-
-                  CHART_VERSION=\$(grep '^version:' ${CHART_DIR}/Chart.yaml | awk '{print \$2}')
-
-                  echo "===== Deploying ====="
-                  echo "Chart: ${CHART_NAME}  Version: \$CHART_VERSION"
-                  echo "Image: ${DOCKER_IMAGE}:${IMAGE_TAG}"
-
-                  helm upgrade --install ${RELEASE_NAME} ${JFROG_OCI_URL}/${CHART_NAME} \
-                    --version \$CHART_VERSION \
-                    --namespace ${KUBE_NAMESPACE} \
-                    --create-namespace \
-                    --set image.repository=${DOCKER_IMAGE} \
-                    --set image.tag=${IMAGE_TAG} \
-                    --set image.pullPolicy=Always \
-                    --wait --atomic --debug
-
-                  echo "===== Pods ====="
-                  kubectl get pods -n ${KUBE_NAMESPACE}
-                  echo "===== Services ====="
-                  kubectl get svc -n ${KUBE_NAMESPACE}
-                """
-            }
-        }
-    }
-
-    post {
-        always {
-            sh "helm registry logout ${JFROG_HOST} || true"
-            cleanWs()
-        }
-        success {
-            echo "Hello World WAR App Deployed Successfully!"
-        }
-        failure {
-            echo "FAILED: Check stage logs above."
-        }
-    }
-}
