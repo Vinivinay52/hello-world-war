@@ -12,7 +12,7 @@ pipeline {
         CHART_DIR       = "helm/hello-world-war"
         CHART_NAME      = "hello-world-war"
 
-        // JFrog Helm OCI
+        // JFROG Helm OCI
         JFROG_HOST      = "trialf5h0jz.jfrog.io"
         JFROG_HELM_REPO = "hello-world-war"
         JFROG_OCI_URL   = "oci://${JFROG_HOST}/${JFROG_HELM_REPO}"
@@ -37,7 +37,7 @@ pipeline {
             }
         }
 
-        // Find the actual chart dir even if the repo has spaces / special hyphens in parent folder names
+        // FIXED: resolve the chart directory that directly contains values.yaml
         stage("Locate chart dir") {
             steps {
                 script {
@@ -46,9 +46,11 @@ pipeline {
                         label: "find chart dir",
                         script: '''
                             set -e
+                            # Find .../helm/hello-world-war/values.yaml anywhere in the repo
                             p=$(find . -type f -path "*/helm/hello-world-war/values.yaml" -print -quit)
                             if [ -n "$p" ]; then
-                              dirname "$(dirname "$p")"   # -> .../helm/hello-world-war
+                              # Return the directory that directly contains values.yaml (helm/hello-world-war)
+                              dirname "$p"
                             fi
                         '''
                     ).trim()
@@ -57,6 +59,7 @@ pipeline {
                         error "Could not locate values.yaml for hello-world-war chart (pattern */helm/hello-world-war/values.yaml)"
                     }
 
+                    // Normalize leading "./" if present
                     env.CHART_DIR_RESOLVED = found.replaceFirst(/^\\.\//, "")
                     echo "Resolved chart dir: ${env.CHART_DIR_RESOLVED}"
                 }
@@ -67,6 +70,8 @@ pipeline {
             steps {
                 sh '''
                     set -e
+                    echo "===== Workspace ====="
+                    pwd
                     docker --version
                     helm version
                     kubectl version --client
@@ -112,6 +117,7 @@ pipeline {
             }
         }
 
+        // SAFE Python updater (no Groovy interpolation, reads env via os.environ)
         stage("Update values.yaml") {
             steps {
                 withEnv([
@@ -122,12 +128,10 @@ pipeline {
                 ]) {
                     sh '''
                         set -e
-                        echo "===== Workspace ====="
-                        pwd
-                        ls -la
                         echo "Resolved chart dir: ${CHART_DIR_RESOLVED}"
                         [ -f "${CHART_DIR_RESOLVED}/values.yaml" ] || { echo "values.yaml not found at ${CHART_DIR_RESOLVED}"; exit 2; }
 
+                        # Single-quoted heredoc so no Groovy/shell interpolation inside Python
                         python3 - <<'PY'
 from pathlib import Path
 import os, re
