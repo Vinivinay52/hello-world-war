@@ -6,4 +6,4 @@ image:
 service:
   type: NodePort
   port: 8080
-  nodePort: 30081   # <- we choose 30081 because 30080 and 31174 are already in use
+  nodePort: 30150   # <- we choose 30081 because 30080 and 31174 are already in use
